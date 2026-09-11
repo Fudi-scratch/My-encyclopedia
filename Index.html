@@ -31,8 +31,14 @@
       <button id="addBtn" class="btn-add" type="button">
         <span class="plus" aria-hidden="true">+</span> 追加
       </button>
+      <button id="connBtn" class="btn-conn" type="button">
+        <span class="conn-dot" id="connDot" aria-hidden="true"></span>
+        <span id="connLabel">GitHub未接続</span>
+      </button>
     </div>
   </header>
+
+  <p id="statusBar" class="status-bar" hidden></p>
 
   <div class="layout">
     <nav class="alpha-rail" id="alphaRail" aria-label="索引タブ"></nav>
@@ -45,9 +51,10 @@
   <footer class="site-footer">
     <span id="entryTotal"></span>
     <div class="footer-actions">
-      <button id="exportBtn" class="link-btn" type="button">書き出す（JSON）</button>
+      <button id="refreshBtn" class="link-btn" type="button">GitHubから再読み込み</button>
+      <button id="exportBtn" class="link-btn" type="button">バックアップを書き出す（JSON）</button>
       <label class="link-btn file-label">
-        読み込む（JSON）
+        バックアップを読み込む（JSON）
         <input type="file" id="importInput" accept="application/json" hidden>
       </label>
     </div>
@@ -64,6 +71,55 @@
       <button id="confirmCancel" class="btn-ghost" type="button">やめる</button>
       <button id="confirmOk" class="btn-danger" type="button">削除する</button>
     </div>
+  </div>
+</div>
+
+<div id="settingsOverlay" class="overlay" hidden>
+  <div class="settings-box" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <h2 id="settingsTitle">GitHubへの保存設定</h2>
+    <p class="settings-lead">
+      このデータを保存するGitHubリポジトリと、書き込み用のアクセストークンを設定します。
+      入力したトークンはこのブラウザの中だけで使われ、コードやリポジトリには保存されません。
+    </p>
+
+    <form id="settingsForm" class="settings-form" novalidate>
+      <div class="form-field">
+        <label for="ghOwner">GitHubユーザー名（または組織名）</label>
+        <input type="text" id="ghOwner" placeholder="例：yamada-taro" autocomplete="off">
+      </div>
+      <div class="form-field">
+        <label for="ghRepo">リポジトリ名</label>
+        <input type="text" id="ghRepo" placeholder="例：my-dictionary" autocomplete="off">
+      </div>
+      <div class="form-field">
+        <label for="ghBranch">ブランチ名</label>
+        <input type="text" id="ghBranch" placeholder="main" autocomplete="off">
+      </div>
+      <div class="form-field">
+        <label for="ghPath">データファイルのパス</label>
+        <input type="text" id="ghPath" placeholder="data/entries.json" autocomplete="off">
+      </div>
+      <div class="form-field">
+        <label for="ghToken">Personal Access Token</label>
+        <input type="password" id="ghToken" placeholder="repoのContentsに書き込み権限があるトークン" autocomplete="off">
+        <span class="form-hint">Fine-grained PATなら、このリポジトリだけに絞った「Contents: Read and write」権限がおすすめです。</span>
+      </div>
+      <div class="form-field form-field-checkbox">
+        <label class="checkbox-label">
+          <input type="checkbox" id="ghRemember">
+          このブラウザにトークンを保存する（次回から入力を省略できます）
+        </label>
+        <span class="form-hint">チェックしない場合、タブを閉じると再入力が必要になります。共有パソコンではチェックしないことをおすすめします。</span>
+      </div>
+
+      <p id="settingsError" class="settings-error" hidden></p>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">保存してつなぐ</button>
+        <button type="button" class="btn-ghost" id="settingsCancelBtn">やめる</button>
+        <button type="button" class="btn-danger" id="settingsForgetBtn">接続を解除</button>
+      </div>
+    </form>
   </div>
 </div>
 
