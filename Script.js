@@ -1,12 +1,15 @@
 // ==========================================================
-// 手作り百科事典 - アプリロジック
-// データは localStorage に保存されます（このブラウザだけに残ります）
+// HTML・CSS・JS辞典 - アプリロジック
+// データはブラウザには保存せず、GitHubリポジトリ内のJSONファイルを
+// 直接読み書きします（GitHub REST APIのcontentsエンドポイントを使用）。
 // ==========================================================
 
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "html_css_js_dictionary_entries_v1";
+  const CONFIG_KEY = "gh_dictionary_config_v1"; // owner/repo/branch/path（トークンは含まない）
+  const TOKEN_KEY = "gh_dictionary_token_v1";
+  const REMEMBER_KEY = "gh_dictionary_remember_v1";
 
   const SEED_ENTRIES = [
     {
@@ -72,14 +75,117 @@
   let activeLetter = null;
   let pendingDeleteId = null;
 
+  let ghConfig = null; // {owner, repo, branch, path}
+  let ghToken = null;
+  let currentSha = null; // GitHub上の現在のファイルのsha（更新時に必要）
+  let connectionState = "disconnected"; // disconnected | connecting | connected | error
+  let statusMessage = "";
+
   const collator = new Intl.Collator("ja");
 
-  // ---------------- Storage ----------------
+  // ---------------- Base64 (UTF-8対応) ----------------
 
-  function loadEntries() {
+  function utf8ToBase64(str) {
+    const bytes = new TextEncoder().encode(str);
+    let binary = "";
+    bytes.forEach((b) => (binary += String.fromCharCode(b)));
+    return btoa(binary);
+  }
+
+  function base64ToUtf8(b64) {
+    const binary = atob(b64.replace(/\n/g, ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  function makeId() {
+    return "e_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+  }
+
+  // ---------------- Connection config storage ----------------
+
+  function loadConfig() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      const raw = localStorage.getItem(CONFIG_KEY);
+      ghConfig = raw ? JSON.parse(raw) : null;
+    } catch (err) {
+      ghConfig = null;
+    }
+    const remember = localStorage.getItem(REMEMBER_KEY) === "1";
+    ghToken = remember ? localStorage.getItem(TOKEN_KEY) : sessionStorage.getItem(TOKEN_KEY);
+  }
+
+  function saveConfig(config, token, remember) {
+    ghConfig = config;
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+    localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0");
+    if (token) {
+      ghToken = token;
+    }
+    if (remember) {
+      if (ghToken) localStorage.setItem(TOKEN_KEY, ghToken);
+      sessionStorage.removeItem(TOKEN_KEY);
+    } else {
+      if (ghToken) sessionStorage.setItem(TOKEN_KEY, ghToken);
+      localStorage.removeItem(TOKEN_KEY);
+    }
+  }
+
+  function forgetConnection() {
+    ghConfig = null;
+    ghToken = null;
+    currentSha = null;
+    entries = [];
+    localStorage.removeItem(CONFIG_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REMEMBER_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+    connectionState = "disconnected";
+  }
+
+  function isConfigured() {
+    return !!(ghConfig && ghConfig.owner && ghConfig.repo && ghConfig.path && ghToken);
+  }
+
+  function contentsUrl(withRef) {
+    const branch = ghConfig.branch || "main";
+    const path = ghConfig.path.replace(/^\/+/, "");
+    const base = `https://api.github.com/repos/${encodeURIComponent(ghConfig.owner)}/${encodeURIComponent(
+      ghConfig.repo
+    )}/contents/${path.split("/").map(encodeURIComponent).join("/")}`;
+    return withRef ? `${base}?ref=${encodeURIComponent(branch)}` : base;
+  }
+
+  function authHeaders(extra) {
+    const headers = Object.assign(
+      { Accept: "application/vnd.github+json" },
+      extra || {}
+    );
+    if (ghToken) headers["Authorization"] = "token " + ghToken;
+    return headers;
+  }
+
+  // ---------------- GitHub read / write ----------------
+
+  async function fetchFromGitHub() {
+    if (!isConfigured()) {
+      connectionState = "disconnected";
+      entries = [];
+      currentSha = null;
+      render();
+      return;
+    }
+
+    connectionState = "connecting";
+    statusMessage = "GitHubから読み込み中…";
+    render();
+
+    try {
+      const res = await fetch(contentsUrl(true), { headers: authHeaders() });
+
+      if (res.status === 404) {
+        // ファイルがまだ存在しない → 見本データを未保存の状態で用意する
         entries = SEED_ENTRIES.map((e) => ({
           id: makeId(),
           title: e.title,
@@ -87,28 +193,98 @@
           body: e.body,
           updatedAt: Date.now(),
         }));
-        saveEntries();
+        currentSha = null;
+        connectionState = "connected";
+        statusMessage =
+          "GitHub上にまだデータファイルがありません。項目を追加・編集すると自動的に作成されます。";
+        render();
         return;
       }
-      const parsed = JSON.parse(raw);
+
+      if (res.status === 401 || res.status === 403) {
+        connectionState = "error";
+        statusMessage =
+          "GitHubへのアクセスが拒否されました。トークンの有効期限や権限（Contents: Read and write）を確認してください。";
+        render();
+        return;
+      }
+
+      if (!res.ok) {
+        connectionState = "error";
+        statusMessage = `GitHubからの読み込みに失敗しました（status: ${res.status}）。`;
+        render();
+        return;
+      }
+
+      const data = await res.json();
+      currentSha = data.sha;
+      const text = base64ToUtf8(data.content || "");
+      const parsed = text.trim() ? JSON.parse(text) : [];
       entries = Array.isArray(parsed) ? parsed : [];
+      connectionState = "connected";
+      statusMessage = "";
+      render();
     } catch (err) {
-      console.error("読み込みに失敗しました", err);
-      entries = [];
+      console.error(err);
+      connectionState = "error";
+      statusMessage =
+        "GitHubに接続できませんでした。通信環境や、ユーザー名・リポジトリ名の入力に誤りがないか確認してください。";
+      render();
     }
   }
 
-  function saveEntries() {
+  /**
+   * entries全体をGitHubにコミットする。
+   * @returns {Promise<{ok:boolean, conflict?:boolean}>}
+   */
+  async function commitEntries(nextEntries, message) {
+    if (!isConfigured()) {
+      showToast("先にGitHub連携を設定してください");
+      openSettings();
+      return { ok: false };
+    }
+
+    const body = {
+      message: message || "Update dictionary entries",
+      content: utf8ToBase64(JSON.stringify(nextEntries, null, 2)),
+      branch: ghConfig.branch || "main",
+    };
+    if (currentSha) body.sha = currentSha;
+
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    } catch (err) {
-      console.error("保存に失敗しました", err);
-      showToast("保存に失敗しました（ブラウザの容量制限の可能性があります）");
-    }
-  }
+      const res = await fetch(contentsUrl(false), {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
 
-  function makeId() {
-    return "e_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+      if (res.status === 409 || res.status === 422) {
+        showToast("GitHub上のデータが更新されていたため、最新の内容を読み込み直します");
+        await fetchFromGitHub();
+        return { ok: false, conflict: true };
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        showToast("GitHubへの書き込みが拒否されました。トークンの権限を確認してください");
+        return { ok: false };
+      }
+
+      if (!res.ok) {
+        showToast(`GitHubへの保存に失敗しました（status: ${res.status}）`);
+        return { ok: false };
+      }
+
+      const data = await res.json();
+      currentSha = data.content ? data.content.sha : currentSha;
+      entries = nextEntries;
+      connectionState = "connected";
+      statusMessage = "";
+      return { ok: true };
+    } catch (err) {
+      console.error(err);
+      showToast("通信エラーのためGitHubに保存できませんでした");
+      return { ok: false };
+    }
   }
 
   // ---------------- Elements ----------------
@@ -123,10 +299,26 @@
     volumeCount: document.getElementById("volumeCount"),
     exportBtn: document.getElementById("exportBtn"),
     importInput: document.getElementById("importInput"),
+    refreshBtn: document.getElementById("refreshBtn"),
     overlay: document.getElementById("confirmOverlay"),
     confirmMessage: document.getElementById("confirmMessage"),
     confirmCancel: document.getElementById("confirmCancel"),
     confirmOk: document.getElementById("confirmOk"),
+    connBtn: document.getElementById("connBtn"),
+    connDot: document.getElementById("connDot"),
+    connLabel: document.getElementById("connLabel"),
+    statusBar: document.getElementById("statusBar"),
+    settingsOverlay: document.getElementById("settingsOverlay"),
+    settingsForm: document.getElementById("settingsForm"),
+    settingsError: document.getElementById("settingsError"),
+    settingsCancelBtn: document.getElementById("settingsCancelBtn"),
+    settingsForgetBtn: document.getElementById("settingsForgetBtn"),
+    ghOwner: document.getElementById("ghOwner"),
+    ghRepo: document.getElementById("ghRepo"),
+    ghBranch: document.getElementById("ghBranch"),
+    ghPath: document.getElementById("ghPath"),
+    ghToken: document.getElementById("ghToken"),
+    ghRemember: document.getElementById("ghRemember"),
   };
 
   // ---------------- Helpers ----------------
@@ -170,7 +362,38 @@
     clearTimeout(showToast._t);
     showToast._t = setTimeout(() => {
       els.toast.hidden = true;
-    }, 2400);
+    }, 2600);
+  }
+
+  function formatDate(ts) {
+    if (!ts) return "-";
+    const d = new Date(ts);
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+  }
+
+  // ---------------- Connection status UI ----------------
+
+  function renderConnStatus() {
+    els.connDot.classList.remove("is-connected", "is-error");
+    if (connectionState === "connected") {
+      els.connDot.classList.add("is-connected");
+      els.connLabel.textContent = `${ghConfig.owner}/${ghConfig.repo}`;
+    } else if (connectionState === "connecting") {
+      els.connLabel.textContent = "接続中…";
+    } else if (connectionState === "error") {
+      els.connDot.classList.add("is-error");
+      els.connLabel.textContent = "接続エラー";
+    } else {
+      els.connLabel.textContent = "GitHub未接続";
+    }
+
+    if (statusMessage) {
+      els.statusBar.hidden = false;
+      els.statusBar.textContent = statusMessage;
+      els.statusBar.classList.toggle("is-error", connectionState === "error");
+    } else {
+      els.statusBar.hidden = true;
+    }
   }
 
   // ---------------- Alpha rail ----------------
@@ -208,6 +431,27 @@
   }
 
   // ---------------- Views ----------------
+
+  function renderConnectPrompt() {
+    els.main.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.innerHTML = `
+      <h3>GitHubリポジトリと接続してください</h3>
+      <p>この辞典のデータはGitHub上のJSONファイルに保存されます。<br>先にリポジトリとアクセストークンを設定しましょう。</p>
+    `;
+    const btn = document.createElement("button");
+    btn.className = "btn-add";
+    btn.type = "button";
+    btn.innerHTML = '接続を設定する';
+    btn.addEventListener("click", openSettings);
+    empty.appendChild(btn);
+    els.main.appendChild(empty);
+  }
+
+  function renderConnecting() {
+    els.main.innerHTML = `<div class="empty-state"><h3>読み込み中…</h3><p>GitHubからデータを取得しています。</p></div>`;
+  }
 
   function renderHome() {
     const list = filteredEntries();
@@ -335,12 +579,6 @@
     els.main.appendChild(wrap);
   }
 
-  function formatDate(ts) {
-    if (!ts) return "-";
-    const d = new Date(ts);
-    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
-  }
-
   function renderForm(mode, id) {
     const editing = mode === "edit";
     const entry = editing ? entries.find((e) => e.id === id) : null;
@@ -360,7 +598,7 @@
         <label for="titleInput">項目名</label>
         <input type="text" id="titleInput" maxlength="60" value="${
           editing ? escapeHtml(entry.title) : ""
-        }" placeholder="例：光合成">
+        }" placeholder="例：flexbox">
         <span class="field-error">項目名を入力してください。</span>
       </div>
 
@@ -368,12 +606,12 @@
         <label for="categoryInput">分類（任意）</label>
         <input type="text" id="categoryInput" maxlength="20" value="${
           editing ? escapeHtml(entry.category || "") : ""
-        }" placeholder="例：自然科学">
+        }" placeholder="例：HTML / CSS / JavaScript">
       </div>
 
       <div class="form-field" id="bodyField">
         <label for="bodyInput">本文</label>
-        <textarea id="bodyInput" placeholder="この項目について説明を書きます。">${
+        <textarea id="bodyInput" placeholder="この用語について説明を書きます。">${
           editing ? escapeHtml(entry.body) : ""
         }</textarea>
         <span class="field-error">本文を入力してください。</span>
@@ -386,11 +624,12 @@
       </div>
     `;
 
-    form.addEventListener("submit", (ev) => {
+    form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const titleInput = form.querySelector("#titleInput");
       const bodyInput = form.querySelector("#bodyInput");
       const categoryInput = form.querySelector("#categoryInput");
+      const submitBtn = form.querySelector('button[type="submit"]');
 
       const title = titleInput.value.trim();
       const body = bodyInput.value.trim();
@@ -401,27 +640,41 @@
       if (!title || !body) valid = false;
       if (!valid) return;
 
+      let nextEntries;
+      let targetId;
       if (editing) {
-        entry.title = title;
-        entry.category = categoryInput.value.trim();
-        entry.body = body;
-        entry.updatedAt = Date.now();
-        showToast("項目を更新しました");
-        view = { name: "article", id: entry.id };
+        targetId = entry.id;
+        nextEntries = entries.map((e) =>
+          e.id === entry.id
+            ? { ...e, title, category: categoryInput.value.trim(), body, updatedAt: Date.now() }
+            : e
+        );
       } else {
-        const newEntry = {
-          id: makeId(),
-          title,
-          category: categoryInput.value.trim(),
-          body,
-          updatedAt: Date.now(),
-        };
-        entries.push(newEntry);
-        showToast("新しい項目を追加しました");
-        view = { name: "article", id: newEntry.id };
+        targetId = makeId();
+        nextEntries = [
+          ...entries,
+          { id: targetId, title, category: categoryInput.value.trim(), body, updatedAt: Date.now() },
+        ];
       }
-      saveEntries();
-      render();
+
+      submitBtn.disabled = true;
+      const originalLabel = submitBtn.textContent;
+      submitBtn.textContent = "GitHubに保存中…";
+
+      const result = await commitEntries(
+        nextEntries,
+        editing ? `Update entry: ${title}` : `Add entry: ${title}`
+      );
+
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalLabel;
+
+      if (result.ok) {
+        showToast(editing ? "項目を更新しました" : "新しい項目を追加しました");
+        view = { name: "article", id: targetId };
+        render();
+      }
+      // conflict/failure時はcommitEntries内でトーストを表示済み。フォームはそのまま残す。
     });
 
     form.querySelector("#cancelFormBtn").addEventListener("click", () => {
@@ -435,6 +688,11 @@
   }
 
   function openForm(mode, id) {
+    if (!isConfigured()) {
+      showToast("先にGitHub連携を設定してください");
+      openSettings();
+      return;
+    }
     view = { name: "form", mode, id };
     render();
   }
@@ -457,20 +715,95 @@
   }
 
   els.confirmCancel.addEventListener("click", closeConfirm);
-  els.confirmOk.addEventListener("click", () => {
+  els.confirmOk.addEventListener("click", async () => {
     if (!pendingDeleteId) return;
-    entries = entries.filter((e) => e.id !== pendingDeleteId);
-    saveEntries();
+    const id = pendingDeleteId;
+    const target = entries.find((e) => e.id === id);
+    const nextEntries = entries.filter((e) => e.id !== id);
+
+    els.confirmOk.disabled = true;
+    els.confirmOk.textContent = "削除中…";
+
+    const result = await commitEntries(nextEntries, `Delete entry: ${target ? target.title : id}`);
+
+    els.confirmOk.disabled = false;
+    els.confirmOk.textContent = "削除する";
     closeConfirm();
-    view = { name: "home" };
-    showToast("項目を削除しました");
-    render();
+
+    if (result.ok) {
+      view = { name: "home" };
+      showToast("項目を削除しました");
+      render();
+    }
   });
   els.overlay.addEventListener("click", (ev) => {
     if (ev.target === els.overlay) closeConfirm();
   });
 
-  // ---------------- Export / Import ----------------
+  // ---------------- Settings modal ----------------
+
+  function openSettings() {
+    els.ghOwner.value = ghConfig ? ghConfig.owner || "" : "";
+    els.ghRepo.value = ghConfig ? ghConfig.repo || "" : "";
+    els.ghBranch.value = ghConfig ? ghConfig.branch || "main" : "main";
+    els.ghPath.value = ghConfig ? ghConfig.path || "data/entries.json" : "data/entries.json";
+    els.ghToken.value = "";
+    els.ghToken.placeholder = ghToken
+      ? "（保存済み・変更する場合のみ入力）"
+      : "repoのContentsに書き込み権限があるトークン";
+    els.ghRemember.checked = localStorage.getItem(REMEMBER_KEY) === "1";
+    els.settingsError.hidden = true;
+    els.settingsForgetBtn.hidden = !ghConfig;
+    els.settingsOverlay.hidden = false;
+    els.ghOwner.focus();
+  }
+
+  function closeSettings() {
+    els.settingsOverlay.hidden = true;
+  }
+
+  els.connBtn.addEventListener("click", openSettings);
+  els.settingsCancelBtn.addEventListener("click", closeSettings);
+  els.settingsOverlay.addEventListener("click", (ev) => {
+    if (ev.target === els.settingsOverlay) closeSettings();
+  });
+
+  els.settingsForgetBtn.addEventListener("click", () => {
+    forgetConnection();
+    closeSettings();
+    view = { name: "home" };
+    showToast("GitHubとの接続を解除しました");
+    render();
+  });
+
+  els.settingsForm.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const owner = els.ghOwner.value.trim();
+    const repo = els.ghRepo.value.trim();
+    const branch = els.ghBranch.value.trim() || "main";
+    const path = els.ghPath.value.trim() || "data/entries.json";
+    const tokenInput = els.ghToken.value.trim();
+    const remember = els.ghRemember.checked;
+
+    if (!owner || !repo || !path) {
+      els.settingsError.hidden = false;
+      els.settingsError.textContent = "ユーザー名・リポジトリ名・ファイルパスは必須です。";
+      return;
+    }
+    if (!tokenInput && !ghToken) {
+      els.settingsError.hidden = false;
+      els.settingsError.textContent = "アクセストークンを入力してください。";
+      return;
+    }
+
+    saveConfig({ owner, repo, branch, path }, tokenInput || null, remember);
+    els.settingsError.hidden = true;
+    closeSettings();
+    view = { name: "home" };
+    await fetchFromGitHub();
+  });
+
+  // ---------------- Export / Import (ローカルへのバックアップ) ----------------
 
   els.exportBtn.addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(entries, null, 2)], {
@@ -479,7 +812,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "encyclopedia-entries.json";
+    a.download = "dictionary-entries.json";
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -487,11 +820,15 @@
     showToast("JSONファイルを書き出しました");
   });
 
+  els.refreshBtn.addEventListener("click", () => {
+    fetchFromGitHub();
+  });
+
   els.importInput.addEventListener("change", (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const parsed = JSON.parse(reader.result);
         if (!Array.isArray(parsed)) throw new Error("形式が正しくありません");
@@ -514,11 +851,13 @@
             added++;
           }
         });
-        entries = merged;
-        saveEntries();
-        view = { name: "home" };
-        render();
-        showToast(`${added}件の項目を読み込みました`);
+
+        const result = await commitEntries(merged, `Import ${added} entries from backup`);
+        if (result.ok) {
+          view = { name: "home" };
+          render();
+          showToast(`${added}件の項目をGitHubに保存しました`);
+        }
       } catch (err) {
         console.error(err);
         showToast("読み込みに失敗しました。ファイルの形式を確認してください。");
@@ -539,15 +878,28 @@
   els.addBtn.addEventListener("click", () => openForm("add"));
 
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && !els.overlay.hidden) closeConfirm();
+    if (ev.key !== "Escape") return;
+    if (!els.overlay.hidden) closeConfirm();
+    if (!els.settingsOverlay.hidden) closeSettings();
   });
 
   // ---------------- Master render ----------------
 
   function render() {
+    renderConnStatus();
     renderAlphaRail();
-    els.entryTotal.textContent = `全 ${entries.length} 項目`;
+    els.entryTotal.textContent = isConfigured() ? `全 ${entries.length} 項目` : "";
     els.volumeCount.textContent = Math.max(1, Math.ceil(entries.length / 12));
+
+    if (!isConfigured()) {
+      renderConnectPrompt();
+      return;
+    }
+
+    if (connectionState === "connecting") {
+      renderConnecting();
+      return;
+    }
 
     if (view.name === "article") {
       renderArticle(view.id);
@@ -560,6 +912,11 @@
 
   // ---------------- Init ----------------
 
-  loadEntries();
+  loadConfig();
   render();
+  if (isConfigured()) {
+    fetchFromGitHub();
+  } else {
+    openSettings();
+  }
 })();
