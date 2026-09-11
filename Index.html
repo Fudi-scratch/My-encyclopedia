@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTML・CSS・JS辞典</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <header class="site-header">
+    <div class="brand">
+      <p class="brand-mark">Vol. <span id="volumeCount">1</span></p>
+      <h1>HTML・CSS・JS辞典</h1>
+      <p class="tagline">タグ・プロパティ・メソッドを、自分の言葉でまとめる用語辞典。</p>
+    </div>
+
+    <div class="controls">
+      <label class="search-slot" for="searchInput">
+        <svg class="search-icon" viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="8.5" cy="8.5" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <line x1="13" y1="13" x2="18" y2="18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <input type="search" id="searchInput" placeholder="項目名や本文で検索" autocomplete="off">
+      </label>
+      <button id="addBtn" class="btn-add" type="button">
+        <span class="plus" aria-hidden="true">+</span> 追加
+      </button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="alpha-rail" id="alphaRail" aria-label="索引タブ"></nav>
+
+    <main class="main" id="main">
+      <!-- JSにより home / article / form のいずれかを描画 -->
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <span id="entryTotal"></span>
+    <div class="footer-actions">
+      <button id="exportBtn" class="link-btn" type="button">書き出す（JSON）</button>
+      <label class="link-btn file-label">
+        読み込む（JSON）
+        <input type="file" id="importInput" accept="application/json" hidden>
+      </label>
+    </div>
+  </footer>
+
+</div>
+
+<div id="toast" class="toast" role="status" hidden></div>
+
+<div id="confirmOverlay" class="overlay" hidden>
+  <div class="confirm-box" role="alertdialog" aria-modal="true">
+    <p id="confirmMessage">この項目を削除しますか？</p>
+    <div class="confirm-actions">
+      <button id="confirmCancel" class="btn-ghost" type="button">やめる</button>
+      <button id="confirmOk" class="btn-danger" type="button">削除する</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js" defer></script>
+</body>
+</html>
