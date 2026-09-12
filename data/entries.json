@@ -1,1 +1,9 @@
-{}
+[
+  {
+    "id": "e_mtybnxv6_scjb6o",
+    "title": "border",
+    "category": "CSS",
+    "body": "「太さ」「種類」「色」の3つの要素をスペース区切りでまとめて指定できるのが特徴です。\n基本的な書き方\n.box {\n  border: 2px solid #333333;\n}\n値の順番は自由ですが、一般的に 太さ 種類 色 の順で書くことが多いです。\n\nプロパティ　 　指定するもの　主な値の例\nborder-width　線の太さ　　　 1px, 3px, 0.5rem など\nborder-style　  線の種類(必須)   solid（実線）, dashed（破線）, dotted（点線）border-color     線の色　　　　  #ff0000, rgb(0,0,0), transparent（透明）\n\n上だけ: border-top: 3px solid #ccc;\n下だけ: border-bottom: 2px solid #000;\n左だけ: border-left: 5px solid red;\n右だけ: border-right: 1px dashed blue;",
+    "updatedAt": 1789213740594
+  }
+]
