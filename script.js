@@ -296,7 +296,6 @@
     addBtn: document.getElementById("addBtn"),
     toast: document.getElementById("toast"),
     entryTotal: document.getElementById("entryTotal"),
-    volumeCount: document.getElementById("volumeCount"),
     exportBtn: document.getElementById("exportBtn"),
     importInput: document.getElementById("importInput"),
     refreshBtn: document.getElementById("refreshBtn"),
@@ -907,7 +906,6 @@
     renderConnStatus();
     renderAlphaRail();
     els.entryTotal.textContent = isConfigured() ? `全 ${entries.length} 項目` : "";
-    els.volumeCount.textContent = Math.max(1, Math.ceil(entries.length / 12));
 
     if (!isConfigured()) {
       renderConnectPrompt();
