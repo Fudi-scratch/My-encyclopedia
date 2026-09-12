@@ -305,7 +305,7 @@ button{
   color: var(--ink);
 }
 
-.entry-card .category-tag{
+.category-tag{
   align-self: flex-start;
   font-size: 11.5px;
   color: var(--brass-deep);
@@ -313,6 +313,43 @@ button{
   padding: 2px 8px;
   border-radius: 999px;
 }
+
+.category-tag.cat-html{ color: #b5502f; background: rgba(181,80,47,0.13); }
+.category-tag.cat-css{ color: #2f5fb5; background: rgba(47,95,181,0.12); }
+.category-tag.cat-js{ color: #7a6b12; background: rgba(122,107,18,0.14); }
+
+.category-chips{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.category-chip{
+  border: 1px solid var(--line-strong);
+  background: var(--paper-raised);
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.category-chip:hover{
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.category-chip.is-active{
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper-raised);
+}
+
+.category-chip.cat-html.is-active{ background: #b5502f; border-color: #b5502f; }
+.category-chip.cat-css.is-active{ background: #2f5fb5; border-color: #2f5fb5; }
+.category-chip.cat-js.is-active{ background: #7a6b12; border-color: #7a6b12; }
 
 .entry-card p{
   margin: 4px 0 0;
@@ -428,7 +465,101 @@ button{
   line-height: 1.85;
   color: var(--ink);
   max-width: 68ch;
-  white-space: pre-wrap;
+}
+
+.article-body p{
+  margin: 0 0 16px;
+}
+
+.article-body p:last-child{
+  margin-bottom: 0;
+}
+
+.article-body strong{
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.article-body code{
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 0.86em;
+  background: rgba(169,130,47,0.14);
+  color: var(--brass-deep);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.body-heading{
+  font-family: var(--serif);
+  font-weight: 700;
+  color: var(--ink);
+  margin: 22px 0 10px;
+}
+
+.body-heading-1{ font-size: 26px; }
+.body-heading-2{ font-size: 22px; }
+.body-heading-3{ font-size: 19px; }
+
+.body-heading:first-child{
+  margin-top: 0;
+}
+
+.body-list{
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+
+.body-list li{
+  margin-bottom: 6px;
+}
+
+.body-list li:last-child{
+  margin-bottom: 0;
+}
+
+.body-code{
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  background: rgba(38,43,53,0.06);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 14px 16px;
+  margin: 0 0 16px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.body-code code{
+  background: none;
+  color: var(--ink);
+  padding: 0;
+  font-size: inherit;
+}
+
+.body-table{
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 16px;
+  font-family: var(--sans);
+  font-size: 14.5px;
+}
+
+.body-table th,
+.body-table td{
+  border: 1px solid var(--line);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.body-table th{
+  background: var(--paper-raised);
+  color: var(--brass-deep);
+  font-weight: 600;
+}
+
+.body-table tr:nth-child(even) td{
+  background: rgba(169,130,47,0.05);
 }
 
 /* ---------------- Form (add / edit) ---------------- */
@@ -459,6 +590,8 @@ button{
 }
 
 .form-field input[type="text"],
+.form-field input[type="password"],
+.form-field select,
 .form-field textarea{
   font-family: var(--sans);
   font-size: 15px;
@@ -470,7 +603,18 @@ button{
   resize: vertical;
 }
 
+.form-field select{
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-faint) 50%), linear-gradient(135deg, var(--ink-faint) 50%, transparent 50%);
+  background-position: calc(100% - 18px) center, calc(100% - 13px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 32px;
+}
+
 .form-field input[type="text"]:focus,
+.form-field input[type="password"]:focus,
+.form-field select:focus,
 .form-field textarea:focus{
   border-color: var(--brass-deep);
 }
@@ -514,6 +658,7 @@ button{
 }
 
 .form-field.has-error input,
+.form-field.has-error select,
 .form-field.has-error textarea{
   border-color: var(--maroon);
 }
