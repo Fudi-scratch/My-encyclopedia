@@ -1,4 +1,4 @@
-# HTML・CSS・JS辞典
+<img src="./HTML・CSS・JS辞典.png" alt="HTML・CSS・JS辞典" width="100%">
 
 HTML / CSS / JavaScript の用語を自分でまとめていく辞典アプリです。ホーム画面から項目の追加・編集・削除・検索ができます。
 
