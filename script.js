@@ -796,11 +796,29 @@
       return;
     }
 
-    saveConfig({ owner, repo, branch, path }, tokenInput || null, remember);
+    const submitBtn = els.settingsForm.querySelector('button[type="submit"]');
+    const originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "接続を確認しています…";
     els.settingsError.hidden = true;
-    closeSettings();
-    view = { name: "home" };
+
+    saveConfig({ owner, repo, branch, path }, tokenInput || null, remember);
     await fetchFromGitHub();
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalLabel;
+
+    if (connectionState === "connected") {
+      // 接続成功。モーダルを閉じてホーム画面へ。
+      closeSettings();
+      view = { name: "home" };
+      render();
+    } else {
+      // 失敗理由をモーダル内にそのまま表示し、入力し直せるようにする。
+      els.settingsError.hidden = false;
+      els.settingsError.textContent =
+        statusMessage || "接続に失敗しました。入力内容を確認してください。";
+    }
   });
 
   // ---------------- Export / Import (ローカルへのバックアップ) ----------------
