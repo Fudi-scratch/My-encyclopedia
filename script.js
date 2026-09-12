@@ -16,7 +16,7 @@
       title: "<div>要素",
       category: "HTML",
       body:
-        "意味を持たない、汎用のブロックレベル要素。それ自体に見た目や役割はなく、CSSでスタイルを当てたりJavaScriptで操作したりするための入れ物として使う。見出しや段落など、意味に合ったタグが他にある場合はそちらを優先するのが基本。",
+        "意味を持たない、汎用のブロックレベル要素。それ自体に見た目や役割はなく、CSSでスタイルを当てたりJavaScriptで操作したりするための入れ物として使う。見出しや段落など、意味に合ったタグが他にある場合はそちらを優先するのが基本。\n\n**メモ:** 見た目の手がかりがないぶん、`class`属性や`id`属性を付けてCSS側で装飾するのが一般的な使い方。",
     },
     {
       title: "<a>要素",
@@ -34,7 +34,7 @@
       title: "display",
       category: "CSS",
       body:
-        "要素がどのようにレイアウトされるかを決めるプロパティ。blockは幅いっぱいのブロック、inlineは文章の一部のように並ぶ要素、flexやgridは子要素を柔軟に並べるレイアウトを作る。値によって要素の振る舞いが大きく変わる、レイアウトの基本となるプロパティ。",
+        "要素がどのようにレイアウトされるかを決めるプロパティ。blockは幅いっぱいのブロック、inlineは文章の一部のように並ぶ要素、flexやgridは子要素を柔軟に並べるレイアウトを作る。値によって要素の振る舞いが大きく変わる、レイアウトの基本となるプロパティ。\n\n代表的な値:\n- block\n- inline\n- inline-block\n- flex\n- grid\n- none\n\n例:\n```\n.box {\n  display: flex;\n}\n```",
     },
     {
       title: "flexbox",
@@ -46,13 +46,13 @@
       title: "position",
       category: "CSS",
       body:
-        "要素の配置方法を指定するプロパティ。staticが初期値で、relativeは元の位置を基準にずらせる。absoluteは直近のrelative（など）な祖先要素を基準に配置され、fixedは画面に固定、stickyはスクロールに応じて固定と通常配置を切り替える。",
+        "要素の配置方法を指定するプロパティ。staticが初期値で、relativeは元の位置を基準にずらせる。absoluteは直近のrelative（など）な祖先要素を基準に配置され、fixedは画面に固定、stickyはスクロールに応じて固定と通常配置を切り替える。\n\n| 値 | 配置の基準 |\n| --- | --- |\n| static | 通常の配置（初期値） |\n| relative | 自分の元の位置 |\n| absolute | 位置指定された祖先要素 |\n| fixed | ビューポート（画面） |\n| sticky | スクロール位置に応じて切り替え |",
     },
     {
       title: "addEventListener",
       category: "JavaScript",
       body:
-        "要素にイベントの監視を追加するメソッド。第1引数にclickやkeydownなどのイベント名、第2引数に実行する関数を渡す。同じ要素に複数のリスナーを追加でき、onclickのようなプロパティへの代入と違って上書きされない。",
+        "要素にイベントの監視を追加するメソッド。第1引数にclickやkeydownなどのイベント名、第2引数に実行する関数を渡す。同じ要素に複数のリスナーを追加でき、onclickのようなプロパティへの代入と違って上書きされない。\n\n例:\n```\nbutton.addEventListener(\"click\", () => {\n  console.log(\"clicked\");\n});\n```",
     },
     {
       title: "querySelector",
@@ -68,11 +68,14 @@
     },
   ];
 
+  const CATEGORIES = ["HTML", "CSS", "JavaScript"];
+
   /** @type {{id:string, title:string, category:string, body:string, updatedAt:number}[]} */
   let entries = [];
   let view = { name: "home" }; // {name:'home'} | {name:'article', id} | {name:'form', mode:'add'|'edit', id?}
   let searchTerm = "";
   let activeLetter = null;
+  let activeCategory = null;
   let pendingDeleteId = null;
 
   let ghConfig = null; // {owner, repo, branch, path}
@@ -330,8 +333,145 @@
       .replace(/"/g, "&quot;");
   }
 
+  // カード一覧のプレビュー用：記法の記号を取り除いた簡易プレーンテキストにする
+  function plainPreview(text) {
+    return String(text)
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/^\s*\|?[\s:|-]+\|[\s:|-]*$/gm, " ")
+      .replace(/^#{1,3}\s*/gm, "")
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/^[-・]\s+/gm, "")
+      .replace(/\|/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  // 記事本文の簡易記法をHTMLに変換する。
+  // 対応記法: **太字** / `インラインコード` / # 大きな文字 / - 箇条書き /
+  //           ```コードブロック``` / | 表 | の形式のテーブル
+  function renderBodyRich(text) {
+    const lines = String(text).replace(/\r\n/g, "\n").split("\n");
+    const htmlParts = [];
+    let i = 0;
+
+    function inline(line) {
+      let out = escapeHtml(line);
+      out = out.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+      return out;
+    }
+
+    function isTableRow(line) {
+      return /\|/.test(line.trim());
+    }
+
+    function isTableSeparator(line) {
+      const cells = line.trim().replace(/^\||\|$/g, "").split("|");
+      return cells.length > 0 && cells.every((c) => /^:?-{1,}:?$/.test(c.trim()));
+    }
+
+    function splitRow(line) {
+      return line
+        .trim()
+        .replace(/^\||\|$/g, "")
+        .split("|")
+        .map((c) => c.trim());
+    }
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // コードブロック ```...```
+      if (/^```/.test(line.trim())) {
+        const codeLines = [];
+        i++;
+        while (i < lines.length && !/^```/.test(lines[i].trim())) {
+          codeLines.push(lines[i]);
+          i++;
+        }
+        i++; // 閉じる```をスキップ
+        htmlParts.push(`<pre class="body-code"><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+        continue;
+      }
+
+      // 表 | a | b |\n| - | - |\n| 1 | 2 |
+      if (isTableRow(line) && lines[i + 1] && isTableSeparator(lines[i + 1])) {
+        const header = splitRow(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].trim() && isTableRow(lines[i]) && !isTableSeparator(lines[i])) {
+          rows.push(splitRow(lines[i]));
+          i++;
+        }
+        let tableHtml = '<table class="body-table"><thead><tr>';
+        header.forEach((cell) => (tableHtml += `<th>${inline(cell)}</th>`));
+        tableHtml += "</tr></thead><tbody>";
+        rows.forEach((row) => {
+          tableHtml += "<tr>";
+          header.forEach((_, idx) => (tableHtml += `<td>${inline(row[idx] || "")}</td>`));
+          tableHtml += "</tr>";
+        });
+        tableHtml += "</tbody></table>";
+        htmlParts.push(tableHtml);
+        continue;
+      }
+
+      // 見出し（大きな文字） # 見出し
+      const headingMatch = line.match(/^(#{1,3})\s+(.*)$/);
+      if (headingMatch) {
+        const level = headingMatch[1].length;
+        htmlParts.push(`<p class="body-heading body-heading-${level}">${inline(headingMatch[2])}</p>`);
+        i++;
+        continue;
+      }
+
+      // 箇条書き - item
+      if (/^[-・]\s+/.test(line.trim())) {
+        const items = [];
+        while (i < lines.length && /^[-・]\s+/.test(lines[i].trim())) {
+          items.push(lines[i].trim().replace(/^[-・]\s+/, ""));
+          i++;
+        }
+        htmlParts.push("<ul class=\"body-list\">" + items.map((it) => `<li>${inline(it)}</li>`).join("") + "</ul>");
+        continue;
+      }
+
+      // 空行はブロックの区切り
+      if (!line.trim()) {
+        i++;
+        continue;
+      }
+
+      // 通常の段落（連続する行は<br>でつなげる）
+      const paraLines = [line];
+      i++;
+      while (
+        i < lines.length &&
+        lines[i].trim() &&
+        !/^```/.test(lines[i].trim()) &&
+        !/^[-・]\s+/.test(lines[i].trim()) &&
+        !/^#{1,3}\s+/.test(lines[i]) &&
+        !(isTableRow(lines[i]) && lines[i + 1] && isTableSeparator(lines[i + 1]))
+      ) {
+        paraLines.push(lines[i]);
+        i++;
+      }
+      htmlParts.push("<p>" + paraLines.map(inline).join("<br>") + "</p>");
+    }
+
+    return htmlParts.join("\n");
+  }
+
   function firstChar(title) {
     return (title || "?").trim().charAt(0).toUpperCase() || "?";
+  }
+
+  function categoryClass(category) {
+    if (category === "HTML") return "cat-html";
+    if (category === "CSS") return "cat-css";
+    if (category === "JavaScript") return "cat-js";
+    return "";
   }
 
   function sortedEntries() {
@@ -351,6 +491,9 @@
     }
     if (activeLetter) {
       list = list.filter((e) => firstChar(e.title) === activeLetter);
+    }
+    if (activeCategory) {
+      list = list.filter((e) => e.category === activeCategory);
     }
     return list;
   }
@@ -452,6 +595,36 @@
     els.main.innerHTML = `<div class="empty-state"><h3>読み込み中…</h3><p>GitHubからデータを取得しています。</p></div>`;
   }
 
+  function renderCategoryChips() {
+    const wrap = document.createElement("div");
+    wrap.className = "category-chips";
+
+    const allChip = document.createElement("button");
+    allChip.type = "button";
+    allChip.className = "category-chip" + (activeCategory === null ? " is-active" : "");
+    allChip.textContent = "すべて";
+    allChip.addEventListener("click", () => {
+      activeCategory = null;
+      render();
+    });
+    wrap.appendChild(allChip);
+
+    CATEGORIES.forEach((cat) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className =
+        "category-chip " + categoryClass(cat) + (activeCategory === cat ? " is-active" : "");
+      chip.textContent = cat;
+      chip.addEventListener("click", () => {
+        activeCategory = activeCategory === cat ? null : cat;
+        render();
+      });
+      wrap.appendChild(chip);
+    });
+
+    return wrap;
+  }
+
   function renderHome() {
     const list = filteredEntries();
 
@@ -473,13 +646,17 @@
       return;
     }
 
+    els.main.innerHTML = "";
+    els.main.appendChild(renderCategoryChips());
+
     if (list.length === 0) {
-      els.main.innerHTML = `
-        <div class="empty-state">
-          <h3>見つかりませんでした</h3>
-          <p>検索条件や索引タブを変えてお試しください。</p>
-        </div>
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.innerHTML = `
+        <h3>見つかりませんでした</h3>
+        <p>検索条件・索引タブ・分類の組み合わせを変えてお試しください。</p>
       `;
+      els.main.appendChild(empty);
       return;
     }
 
@@ -489,6 +666,8 @@
       ? `「${searchTerm}」の検索結果（${list.length}件）`
       : activeLetter
       ? `索引：${activeLetter}（${list.length}件）`
+      : activeCategory
+      ? `分類：${activeCategory}（${list.length}件）`
       : `すべての項目（${list.length}件）`;
 
     const grid = document.createElement("div");
@@ -499,9 +678,15 @@
       card.type = "button";
       card.className = "entry-card";
       card.innerHTML = `
-        ${entry.category ? `<span class="category-tag">${escapeHtml(entry.category)}</span>` : ""}
+        ${
+          entry.category
+            ? `<span class="category-tag ${categoryClass(entry.category)}">${escapeHtml(
+                entry.category
+              )}</span>`
+            : ""
+        }
         <h3>${escapeHtml(entry.title)}</h3>
-        <p>${escapeHtml(entry.body)}</p>
+        <p>${escapeHtml(plainPreview(entry.body))}</p>
       `;
       card.addEventListener("click", () => {
         view = { name: "article", id: entry.id };
@@ -510,10 +695,10 @@
       grid.appendChild(card);
     });
 
-    els.main.innerHTML = "";
     els.main.appendChild(label);
     els.main.appendChild(grid);
   }
+
 
   function renderArticle(id) {
     const entry = entries.find((e) => e.id === id);
@@ -541,7 +726,13 @@
       <div>
         <h2>${escapeHtml(entry.title)}</h2>
         <div class="article-meta">
-          ${entry.category ? `<span class="category-tag">${escapeHtml(entry.category)}</span>` : ""}
+          ${
+            entry.category
+              ? `<span class="category-tag ${categoryClass(entry.category)}">${escapeHtml(
+                  entry.category
+                )}</span>`
+              : ""
+          }
           <span>更新日: ${formatDate(entry.updatedAt)}</span>
         </div>
       </div>
@@ -568,7 +759,7 @@
 
     const body = document.createElement("div");
     body.className = "article-body";
-    body.textContent = entry.body;
+    body.innerHTML = renderBodyRich(entry.body);
 
     wrap.appendChild(back);
     wrap.appendChild(head);
@@ -601,11 +792,16 @@
         <span class="field-error">項目名を入力してください。</span>
       </div>
 
-      <div class="form-field">
-        <label for="categoryInput">分類（任意）</label>
-        <input type="text" id="categoryInput" maxlength="20" value="${
-          editing ? escapeHtml(entry.category || "") : ""
-        }" placeholder="例：HTML / CSS / JavaScript">
+      <div class="form-field" id="categoryField">
+        <label for="categoryInput">分類</label>
+        <select id="categoryInput">
+          <option value="" disabled${editing && entry.category ? "" : " selected"}>選択してください</option>
+          ${CATEGORIES.map(
+            (cat) =>
+              `<option value="${cat}"${editing && entry.category === cat ? " selected" : ""}>${cat}</option>`
+          ).join("")}
+        </select>
+        <span class="field-error">分類を選んでください。</span>
       </div>
 
       <div class="form-field" id="bodyField">
@@ -614,7 +810,10 @@
           editing ? escapeHtml(entry.body) : ""
         }</textarea>
         <span class="field-error">本文を入力してください。</span>
-        <span class="form-hint">改行はそのまま表示に反映されます。</span>
+        <span class="form-hint">
+          **太字** ／ &#96;インラインコード&#96; ／ # 大きな文字 ／ - 箇条書き ／
+          &#96;&#96;&#96;で囲むとコードブロック ／ | 列1 | 列2 | の形式で表 が使えます。
+        </span>
       </div>
 
       <div class="form-actions">
@@ -632,11 +831,13 @@
 
       const title = titleInput.value.trim();
       const body = bodyInput.value.trim();
+      const category = categoryInput.value;
 
       let valid = true;
       form.querySelector("#titleField").classList.toggle("has-error", !title);
       form.querySelector("#bodyField").classList.toggle("has-error", !body);
-      if (!title || !body) valid = false;
+      form.querySelector("#categoryField").classList.toggle("has-error", !category);
+      if (!title || !body || !category) valid = false;
       if (!valid) return;
 
       let nextEntries;
@@ -644,16 +845,11 @@
       if (editing) {
         targetId = entry.id;
         nextEntries = entries.map((e) =>
-          e.id === entry.id
-            ? { ...e, title, category: categoryInput.value.trim(), body, updatedAt: Date.now() }
-            : e
+          e.id === entry.id ? { ...e, title, category, body, updatedAt: Date.now() } : e
         );
       } else {
         targetId = makeId();
-        nextEntries = [
-          ...entries,
-          { id: targetId, title, category: categoryInput.value.trim(), body, updatedAt: Date.now() },
-        ];
+        nextEntries = [...entries, { id: targetId, title, category, body, updatedAt: Date.now() }];
       }
 
       submitBtn.disabled = true;
