@@ -15,7 +15,6 @@
 
   <header class="site-header">
     <div class="brand">
-      <p class="brand-mark">Vol. <span id="volumeCount">1</span></p>
       <h1>HTML・CSS・JS辞典</h1>
       <p class="tagline">タグ・プロパティ・メソッドを、自分の言葉でまとめる用語辞典。</p>
     </div>
@@ -78,8 +77,7 @@
   <div class="settings-box" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <h2 id="settingsTitle">GitHubへの保存設定</h2>
     <p class="settings-lead">
-      このデータを保存するGitHubリポジトリと、書き込み用のアクセストークンを設定します。
-      入力したトークンはこのブラウザの中だけで使われ、コードやリポジトリには保存されません。
+      データを保存するGitHubリポジトリと、書き込み用のアクセストークンを入力してください。
     </p>
 
     <form id="settingsForm" class="settings-form" novalidate>
@@ -102,14 +100,12 @@
       <div class="form-field">
         <label for="ghToken">Personal Access Token</label>
         <input type="password" id="ghToken" placeholder="repoのContentsに書き込み権限があるトークン" autocomplete="off">
-        <span class="form-hint">Fine-grained PATなら、このリポジトリだけに絞った「Contents: Read and write」権限がおすすめです。</span>
       </div>
       <div class="form-field form-field-checkbox">
         <label class="checkbox-label">
           <input type="checkbox" id="ghRemember">
-          このブラウザにトークンを保存する（次回から入力を省略できます）
+          このブラウザにトークンを保存する
         </label>
-        <span class="form-hint">チェックしない場合、タブを閉じると再入力が必要になります。共有パソコンではチェックしないことをおすすめします。</span>
       </div>
 
       <p id="settingsError" class="settings-error" hidden></p>
