@@ -395,26 +395,34 @@
         continue;
       }
 
-      // 表 | a | b |\n| - | - |\n| 1 | 2 |
-      if (isTableRow(line) && lines[i + 1] && isTableSeparator(lines[i + 1])) {
-        const header = splitRow(line);
-        i += 2;
-        const rows = [];
-        while (i < lines.length && lines[i].trim() && isTableRow(lines[i]) && !isTableSeparator(lines[i])) {
-          rows.push(splitRow(lines[i]));
-          i++;
+      // 表: | a | b |\n| c | d |  のように | で区切った行が2行以上続けば表とみなす
+      // （| --- | --- | のような区切り行があれば見出し行の直後で読み飛ばす）
+      if (isTableRow(line)) {
+        let j = i;
+        const collected = [];
+        while (j < lines.length && isTableRow(lines[j])) {
+          if (!isTableSeparator(lines[j])) {
+            collected.push(splitRow(lines[j]));
+          }
+          j++;
         }
-        let tableHtml = '<table class="body-table"><thead><tr>';
-        header.forEach((cell) => (tableHtml += `<th>${inline(cell)}</th>`));
-        tableHtml += "</tr></thead><tbody>";
-        rows.forEach((row) => {
-          tableHtml += "<tr>";
-          header.forEach((_, idx) => (tableHtml += `<td>${inline(row[idx] || "")}</td>`));
-          tableHtml += "</tr>";
-        });
-        tableHtml += "</tbody></table>";
-        htmlParts.push(tableHtml);
-        continue;
+        if (collected.length >= 2) {
+          const header = collected[0];
+          const rows = collected.slice(1);
+          let tableHtml = '<table class="body-table"><thead><tr>';
+          header.forEach((cell) => (tableHtml += `<th>${inline(cell)}</th>`));
+          tableHtml += "</tr></thead><tbody>";
+          rows.forEach((row) => {
+            tableHtml += "<tr>";
+            header.forEach((_, idx) => (tableHtml += `<td>${inline(row[idx] || "")}</td>`));
+            tableHtml += "</tr>";
+          });
+          tableHtml += "</tbody></table>";
+          htmlParts.push(tableHtml);
+          i = j;
+          continue;
+        }
+        // 1行しかない場合は表とみなさず、通常の段落として扱う（下に進む）
       }
 
       // 見出し（大きな文字） # 見出し
@@ -452,7 +460,7 @@
         !/^```/.test(lines[i].trim()) &&
         !/^[-・]\s+/.test(lines[i].trim()) &&
         !/^#{1,3}\s+/.test(lines[i]) &&
-        !(isTableRow(lines[i]) && lines[i + 1] && isTableSeparator(lines[i + 1]))
+        !isTableRow(lines[i])
       ) {
         paraLines.push(lines[i]);
         i++;
