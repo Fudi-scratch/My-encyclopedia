@@ -3,7 +3,7 @@
     "id": "e_mu1tua29_2looxo",
     "title": "border",
     "category": "CSS",
-    "body": "`border`",
-    "updatedAt": 1789425667953
+    "body": "# 基本的な書き方\n最も一般的な書き方は`border` プロパティに「太さ」「種類」「色」を並べる方法です。",
+    "updatedAt": 1789425886561
   }
 ]
