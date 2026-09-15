@@ -34,7 +34,7 @@
       title: "display",
       category: "CSS",
       body:
-        "要素がどのようにレイアウトされるかを決めるプロパティ。blockは幅いっぱいのブロック、inlineは文章の一部のように並ぶ要素、flexやgridは子要素を柔軟に並べるレイアウトを作る。値によって要素の振る舞いが大きく変わる、レイアウトの基本となるプロパティ。\n\n代表的な値:\n- block\n- inline\n- inline-block\n- flex\n- grid\n- none\n\n例:\n```\n.box {\n  display: flex;\n}\n```",
+        "要素がどのようにレイアウトされるかを決めるプロパティ。blockは幅いっぱいのブロック、inlineは文章の一部のように並ぶ要素、flexやgridは子要素を柔軟に並べるレイアウトを作る。値によって要素の振る舞いが大きく変わる、レイアウトの基本となるプロパティ。\n\n代表的な値:\n- block\n- inline\n- inline-block\n- flex\n- grid\n- none\n\n例:\n```css\n.box {\n  display: flex;\n}\n```",
     },
     {
       title: "flexbox",
@@ -52,7 +52,7 @@
       title: "addEventListener",
       category: "JavaScript",
       body:
-        "要素にイベントの監視を追加するメソッド。第1引数にclickやkeydownなどのイベント名、第2引数に実行する関数を渡す。同じ要素に複数のリスナーを追加でき、onclickのようなプロパティへの代入と違って上書きされない。\n\n例:\n```\nbutton.addEventListener(\"click\", () => {\n  console.log(\"clicked\");\n});\n```",
+        "要素にイベントの監視を追加するメソッド。第1引数にclickやkeydownなどのイベント名、第2引数に実行する関数を渡す。同じ要素に複数のリスナーを追加でき、onclickのようなプロパティへの代入と違って上書きされない。\n\n例:\n```js\nbutton.addEventListener(\"click\", () => {\n  console.log(\"clicked\");\n});\n```",
     },
     {
       title: "querySelector",
@@ -383,15 +383,50 @@
       const line = lines[i];
 
       // コードブロック ```...```
+      // 「```」の直後にコードがくっついていたり、閉じる「```」がコードの末尾に
+      // くっついていても崩れないようにする。「```css」のように言語名だけが
+      // 続く場合は、それをタイトルとして表示する。
       if (/^```/.test(line.trim())) {
+        const trimmed = line.trim();
+        const rest = trimmed.slice(3);
         const codeLines = [];
-        i++;
-        while (i < lines.length && !/^```/.test(lines[i].trim())) {
-          codeLines.push(lines[i]);
+        let lang = "";
+
+        const selfCloseMatch = rest.match(/^(.*)```$/);
+        if (selfCloseMatch) {
+          // 1行だけで開いて閉じている場合（例: ```const x = 1;```）
+          codeLines.push(selfCloseMatch[1]);
           i++;
+        } else {
+          if (rest.trim() && /^[A-Za-z0-9_+-]+$/.test(rest.trim())) {
+            // 例: ```css → 言語名として扱いタイトルに使う
+            lang = rest.trim();
+          } else if (rest.trim()) {
+            // 例: ```#box { → 言語名ではなく実際のコードなので1行目として残す
+            codeLines.push(rest);
+          }
+          i++;
+          while (i < lines.length) {
+            const closeIdx = lines[i].indexOf("```");
+            if (closeIdx !== -1) {
+              const before = lines[i].slice(0, closeIdx);
+              if (before) codeLines.push(before);
+              i++;
+              break;
+            }
+            codeLines.push(lines[i]);
+            i++;
+          }
         }
-        i++; // 閉じる```をスキップ
-        htmlParts.push(`<pre class="body-code"><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+
+        const labelHtml = lang
+          ? `<div class="body-code-label">${escapeHtml(lang.toUpperCase())}</div>`
+          : "";
+        htmlParts.push(
+          `<div class="body-code-block${lang ? " has-label" : ""}">${labelHtml}<pre class="body-code"><code>${escapeHtml(
+            codeLines.join("\n")
+          )}</code></pre></div>`
+        );
         continue;
       }
 
@@ -820,7 +855,7 @@
         <span class="field-error">本文を入力してください。</span>
         <span class="form-hint">
           **太字** ／ &#96;インラインコード&#96; ／ # 大きな文字 ／ - 箇条書き ／
-          &#96;&#96;&#96;で囲むとコードブロック ／ | 列1 | 列2 | の形式で表 が使えます。
+          &#96;&#96;&#96;css のように書くとタイトル付きコードブロック ／ | 列1 | 列2 | の形式で表 が使えます。
         </span>
       </div>
 
