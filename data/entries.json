@@ -5,5 +5,12 @@
     "category": "CSS",
     "body": "# 1.基本的な書き方\n最も一般的な書き方は`border` プロパティに「太さ」「種類」「色」を並べる方法です。\n```CSS\n#box {\n  border: 2px solid #333333;\n}```\n- **記述の順番は自由**ですが、一般的に`<太さ> <種類> <色>`の順で書くことが多いです。\n- **注意点**  枠線の`style`を省略、または`none`にすると枠線そのものが表示されなくなります。\n\n# 2.個別に指定するプロパティ\n一括ではなく、個別のプロパティで細かく制御することも可能です。\n|プロパティ名|役割|指定例|\n|`border-width`|枠線の**太さ**を指定|`1px`, `0.5rem`, `thin`, `thick`|\n|`border-style`|枠線の**種類**を指定|`solid`, `dashed`, `dotted` など|\n|`border-color`|枠線の**色**を指定|`#ff0000`, `rgb(0,0,0)`, `transparent`|\n\n# 3.主要なborder-style一覧\nよく使われる代表的なスタイルです。\n- `solid` （実線）：最も標準的な一本線\n- `dashed` （破線）：切り取り線のような長めの点線\n- `dotted` （点線）：丸いドットが並んだ点線\n- `double` （二重線）：二本の線（※綺麗に見せるには2px以上の太さが必要）\n- `none` （線なし）：枠線を表示しない\n\n# 4.特定の「一辺だけ」に線を引く方法\n上下左右のうち、特定の場所だけに枠線をつけたい場合は方向を指定します。見出しのアンダーラインなどに便利です。\n```CSS\n.heading {\n  border-top: 3px solid #ff0000;    /* 上だけ */\n  border-bottom: 2px dashed #000;  /* 下だけ */\n  border-left: 5px solid #333;     /* 左だけ（縦コラム風） */\n  border-right: 1px solid #ccc;    /* 右だけ */\n}\n```\n\n# 5. よく組み合わせて使われるプロパティ\n- `border-radius`\n- `box-sizing: border-box;`",
     "updatedAt": 1789468416831
+  },
+  {
+    "id": "e_mu2jueu1_reojyq",
+    "title": "border-radius",
+    "category": "CSS",
+    "body": "# 1.基本的な書き方\n値を1つだけ指定すると、**四隅すべて**に同じ丸みが適用されます。\n```CSS\n/* すべての角を10pxの半径で丸める */\n.box {\n  border-radius: 10px;\n}```\n\n# 2.指定する値の数による変化\n複数の値を半角スペースで区切って書くことで、各角の丸みを個別にコントロールできます。記述する順番は**左上から時計回り**です。\n|値の数|指定例|適用される場所|\n|**1つ**|`10px`|すべての角|\n|**2つ**|`10px 30px`|**【1番目】左上 と 右下** / **【2番目】右上 と 左下**|\n|**3つ**|`10px 30px 50px`|**【1番目】左上** / **【2番目】右上 と 左下** / **【3番目】右下**|\n|**4つ**|`10px 30px 50px 40px`|**【1番目】左上** / **【2番目】右上** / **【3番目】右下** / **【4番目】左下**|\n\n# 3.よく使うパターン\n- きれいな正円をつくる (正方形の要素に対して`50%`を指定します。)\n```CSS\n.icon {\n  width: 100px;\n  height: 100px;\n  border-radius: 50%; /* 真ん丸になる */\n}```\n- 上側だけを丸める (4値指定を使い、下側の2つを 0 にします。)\n```CSS\n.tab {\n  border-radius: 10px 10px 0 0; /* 左上・右上だけ丸く */\n}```\n\n# 4.個別指定プロパティ\n一括指定を使わず、特定の角だけをピンポイントで指定することも可能です。\n- `border-top-left-radius` （左上）\n- `border-top-right-radius` （右上）\n- `border-bottom-right-radius` （右下）\n- `order-bottom-left-radius` （左下）",
+    "updatedAt": 1789469344154
   }
 ]
