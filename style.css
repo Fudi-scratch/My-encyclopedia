@@ -517,6 +517,31 @@ button{
   margin-bottom: 0;
 }
 
+.body-code-block{
+  position: relative;
+  margin: 0 0 16px;
+}
+
+.body-code-block .body-code{
+  margin: 0;
+}
+
+.body-code-block.has-label .body-code{
+  padding-top: 32px;
+}
+
+.body-code-label{
+  position: absolute;
+  top: 10px;
+  left: 17px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--brass-deep);
+  pointer-events: none;
+}
+
 .body-code{
   font-family: "SFMono-Regular", Consolas, Menlo, monospace;
   font-size: 14px;
