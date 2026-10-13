@@ -1,15 +1,14 @@
 // ==========================================================
-// HTML・CSS・JS辞典 - アプリロジック
-// データはブラウザには保存せず、GitHubリポジトリ内のJSONファイルを
-// 直接読み書きします（GitHub REST APIのcontentsエンドポイントを使用）。
+// HTML・CSS・JS辞典 - アプリロジック（中継API版）
+// データはGitHubのJSONファイルに保存されますが、ブラウザはGitHubに直接触れず、
+// Cloudflare Workers の中継API経由で読み書きします。トークンはサイト側に一切ありません。
 // ==========================================================
 
 (function () {
   "use strict";
 
-  const CONFIG_KEY = "gh_dictionary_config_v1"; // owner/repo/branch/path（トークンは含まない）
-  const TOKEN_KEY = "gh_dictionary_token_v1";
-  const REMEMBER_KEY = "gh_dictionary_remember_v1";
+  // ★ デプロイした中継APIのURLに書き換えてください（末尾のスラッシュなし）
+  const API_BASE = "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev";
 
   const SEED_ENTRIES = [
     {
@@ -78,214 +77,100 @@
   let activeCategory = null;
   let pendingDeleteId = null;
 
-  let ghConfig = null; // {owner, repo, branch, path}
-  let ghToken = null;
-  let currentSha = null; // GitHub上の現在のファイルのsha（更新時に必要）
-  let connectionState = "disconnected"; // disconnected | connecting | connected | error
+  let loading = true;
+  let loadError = false;
+  let seedPending = false; // サーバーにまだファイルが無く、見本データを表示している状態
   let statusMessage = "";
 
   const collator = new Intl.Collator("ja");
-
-  // ---------------- Base64 (UTF-8対応) ----------------
-
-  function utf8ToBase64(str) {
-    const bytes = new TextEncoder().encode(str);
-    let binary = "";
-    bytes.forEach((b) => (binary += String.fromCharCode(b)));
-    return btoa(binary);
-  }
-
-  function base64ToUtf8(b64) {
-    const binary = atob(b64.replace(/\n/g, ""));
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
-  }
 
   function makeId() {
     return "e_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   }
 
-  // ---------------- Connection config storage ----------------
+  // ---------------- 中継API ----------------
 
-  function loadConfig() {
+  async function apiRequest(path, options) {
+    const res = await fetch(API_BASE + path, options);
+    let data = null;
     try {
-      const raw = localStorage.getItem(CONFIG_KEY);
-      ghConfig = raw ? JSON.parse(raw) : null;
+      data = await res.json();
     } catch (err) {
-      ghConfig = null;
+      data = null;
     }
-    const remember = localStorage.getItem(REMEMBER_KEY) === "1";
-    ghToken = remember ? localStorage.getItem(TOKEN_KEY) : sessionStorage.getItem(TOKEN_KEY);
-  }
-
-  function saveConfig(config, token, remember) {
-    ghConfig = config;
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-    localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0");
-    if (token) {
-      ghToken = token;
+    if (!res.ok) {
+      const message = (data && data.error) || `通信に失敗しました（status: ${res.status}）`;
+      const error = new Error(message);
+      error.status = res.status;
+      throw error;
     }
-    if (remember) {
-      if (ghToken) localStorage.setItem(TOKEN_KEY, ghToken);
-      sessionStorage.removeItem(TOKEN_KEY);
-    } else {
-      if (ghToken) sessionStorage.setItem(TOKEN_KEY, ghToken);
-      localStorage.removeItem(TOKEN_KEY);
-    }
+    return data;
   }
 
-  function forgetConnection() {
-    ghConfig = null;
-    ghToken = null;
-    currentSha = null;
-    entries = [];
-    localStorage.removeItem(CONFIG_KEY);
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REMEMBER_KEY);
-    sessionStorage.removeItem(TOKEN_KEY);
-    connectionState = "disconnected";
+  function seedWithIds() {
+    return SEED_ENTRIES.map((e) => ({
+      id: makeId(),
+      title: e.title,
+      category: e.category,
+      body: e.body,
+      updatedAt: Date.now(),
+    }));
   }
 
-  function isConfigured() {
-    return !!(ghConfig && ghConfig.owner && ghConfig.repo && ghConfig.path && ghToken);
-  }
-
-  function contentsUrl(withRef) {
-    const branch = ghConfig.branch || "main";
-    const path = ghConfig.path.replace(/^\/+/, "");
-    const base = `https://api.github.com/repos/${encodeURIComponent(ghConfig.owner)}/${encodeURIComponent(
-      ghConfig.repo
-    )}/contents/${path.split("/").map(encodeURIComponent).join("/")}`;
-    return withRef ? `${base}?ref=${encodeURIComponent(branch)}` : base;
-  }
-
-  function authHeaders(extra) {
-    const headers = Object.assign(
-      { Accept: "application/vnd.github+json" },
-      extra || {}
-    );
-    if (ghToken) headers["Authorization"] = "token " + ghToken;
-    return headers;
-  }
-
-  // ---------------- GitHub read / write ----------------
-
-  async function fetchFromGitHub() {
-    if (!isConfigured()) {
-      connectionState = "disconnected";
-      entries = [];
-      currentSha = null;
-      render();
-      return;
-    }
-
-    connectionState = "connecting";
-    statusMessage = "GitHubから読み込み中…";
+  async function loadEntries() {
+    loading = true;
+    loadError = false;
+    statusMessage = "";
     render();
 
     try {
-      const res = await fetch(contentsUrl(true), { headers: authHeaders() });
-
-      if (res.status === 404) {
-        // ファイルがまだ存在しない → 見本データを未保存の状態で用意する
-        entries = SEED_ENTRIES.map((e) => ({
-          id: makeId(),
-          title: e.title,
-          category: e.category,
-          body: e.body,
-          updatedAt: Date.now(),
-        }));
-        currentSha = null;
-        connectionState = "connected";
-        statusMessage =
-          "GitHub上にまだデータファイルがありません。項目を追加・編集すると自動的に作成されます。";
-        render();
-        return;
+      const data = await apiRequest("/entries", { cache: "no-store" });
+      if (data.entries === null) {
+        // まだデータファイルが無い → 見本データを表示（最初の保存時にサーバー側で作成される）
+        entries = seedWithIds();
+        seedPending = true;
+        statusMessage = "まだ公開データがありません。最初の項目を追加・編集すると、見本データと一緒に保存されます。";
+      } else {
+        entries = data.entries;
+        seedPending = false;
       }
-
-      if (res.status === 401 || res.status === 403) {
-        connectionState = "error";
-        statusMessage =
-          "GitHubへのアクセスが拒否されました。トークンの有効期限や権限（Contents: Read and write）を確認してください。";
-        render();
-        return;
-      }
-
-      if (!res.ok) {
-        connectionState = "error";
-        statusMessage = `GitHubからの読み込みに失敗しました（status: ${res.status}）。`;
-        render();
-        return;
-      }
-
-      const data = await res.json();
-      currentSha = data.sha;
-      const text = base64ToUtf8(data.content || "");
-      const parsed = text.trim() ? JSON.parse(text) : [];
-      entries = Array.isArray(parsed) ? parsed : [];
-      connectionState = "connected";
-      statusMessage = "";
-      render();
     } catch (err) {
       console.error(err);
-      connectionState = "error";
-      statusMessage =
-        "GitHubに接続できませんでした。通信環境や、ユーザー名・リポジトリ名の入力に誤りがないか確認してください。";
-      render();
+      loadError = true;
+      statusMessage = "辞典のデータを読み込めませんでした。時間をおいて「最新の内容を読み込む」をお試しください。";
     }
+    loading = false;
+    render();
   }
 
-  /**
-   * entries全体をGitHubにコミットする。
-   * @returns {Promise<{ok:boolean, conflict?:boolean}>}
-   */
-  async function commitEntries(nextEntries, message) {
-    if (!isConfigured()) {
-      showToast("先にGitHub連携を設定してください");
-      openSettings();
-      return { ok: false };
-    }
+  /** 項目を追加・更新する。成功すると entries がサーバーの最新状態に置き換わる。 */
+  async function saveEntry(entry) {
+    return writeToApi("/upsert", { entry });
+  }
 
-    const body = {
-      message: message || "Update dictionary entries",
-      content: utf8ToBase64(JSON.stringify(nextEntries, null, 2)),
-      branch: ghConfig.branch || "main",
-    };
-    if (currentSha) body.sha = currentSha;
+  async function removeEntry(id) {
+    return writeToApi("/delete", { id });
+  }
 
+  async function writeToApi(path, payload) {
+    const body = Object.assign({}, payload);
+    if (seedPending) body.seed = entries; // ファイルが無い間だけ、見本データも一緒に送る
     try {
-      const res = await fetch(contentsUrl(false), {
-        method: "PUT",
-        headers: authHeaders({ "Content-Type": "application/json" }),
+      const data = await apiRequest(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-
-      if (res.status === 409 || res.status === 422) {
-        showToast("GitHub上のデータが更新されていたため、最新の内容を読み込み直します");
-        await fetchFromGitHub();
-        return { ok: false, conflict: true };
-      }
-
-      if (res.status === 401 || res.status === 403) {
-        showToast("GitHubへの書き込みが拒否されました。トークンの権限を確認してください");
-        return { ok: false };
-      }
-
-      if (!res.ok) {
-        showToast(`GitHubへの保存に失敗しました（status: ${res.status}）`);
-        return { ok: false };
-      }
-
-      const data = await res.json();
-      currentSha = data.content ? data.content.sha : currentSha;
-      entries = nextEntries;
-      connectionState = "connected";
+      entries = data.entries;
+      seedPending = false;
       statusMessage = "";
       return { ok: true };
     } catch (err) {
       console.error(err);
-      showToast("通信エラーのためGitHubに保存できませんでした");
+      showToast(err.message || "保存に失敗しました");
+      if (err.status === 409) {
+        await loadEntries();
+      }
       return { ok: false };
     }
   }
@@ -300,27 +185,12 @@
     toast: document.getElementById("toast"),
     entryTotal: document.getElementById("entryTotal"),
     exportBtn: document.getElementById("exportBtn"),
-    importInput: document.getElementById("importInput"),
     refreshBtn: document.getElementById("refreshBtn"),
     overlay: document.getElementById("confirmOverlay"),
     confirmMessage: document.getElementById("confirmMessage"),
     confirmCancel: document.getElementById("confirmCancel"),
     confirmOk: document.getElementById("confirmOk"),
-    connBtn: document.getElementById("connBtn"),
-    connDot: document.getElementById("connDot"),
-    connLabel: document.getElementById("connLabel"),
     statusBar: document.getElementById("statusBar"),
-    settingsOverlay: document.getElementById("settingsOverlay"),
-    settingsForm: document.getElementById("settingsForm"),
-    settingsError: document.getElementById("settingsError"),
-    settingsCancelBtn: document.getElementById("settingsCancelBtn"),
-    settingsForgetBtn: document.getElementById("settingsForgetBtn"),
-    ghOwner: document.getElementById("ghOwner"),
-    ghRepo: document.getElementById("ghRepo"),
-    ghBranch: document.getElementById("ghBranch"),
-    ghPath: document.getElementById("ghPath"),
-    ghToken: document.getElementById("ghToken"),
-    ghRemember: document.getElementById("ghRemember"),
   };
 
   // ---------------- Helpers ----------------
@@ -383,9 +253,6 @@
       const line = lines[i];
 
       // コードブロック ```...```
-      // 「```」の直後にコードがくっついていたり、閉じる「```」がコードの末尾に
-      // くっついていても崩れないようにする。「```css」のように言語名だけが
-      // 続く場合は、それをタイトルとして表示する。
       if (/^```/.test(line.trim())) {
         const trimmed = line.trim();
         const rest = trimmed.slice(3);
@@ -394,15 +261,12 @@
 
         const selfCloseMatch = rest.match(/^(.*)```$/);
         if (selfCloseMatch) {
-          // 1行だけで開いて閉じている場合（例: ```const x = 1;```）
           codeLines.push(selfCloseMatch[1]);
           i++;
         } else {
           if (rest.trim() && /^[A-Za-z0-9_+-]+$/.test(rest.trim())) {
-            // 例: ```css → 言語名として扱いタイトルに使う
             lang = rest.trim();
           } else if (rest.trim()) {
-            // 例: ```#box { → 言語名ではなく実際のコードなので1行目として残す
             codeLines.push(rest);
           }
           i++;
@@ -430,8 +294,7 @@
         continue;
       }
 
-      // 表: | a | b |\n| c | d |  のように | で区切った行が2行以上続けば表とみなす
-      // （| --- | --- | のような区切り行があれば見出し行の直後で読み飛ばす）
+      // 表
       if (isTableRow(line)) {
         let j = i;
         const collected = [];
@@ -457,10 +320,9 @@
           i = j;
           continue;
         }
-        // 1行しかない場合は表とみなさず、通常の段落として扱う（下に進む）
       }
 
-      // 見出し（大きな文字） # 見出し
+      // 見出し
       const headingMatch = line.match(/^(#{1,3})\s+(.*)$/);
       if (headingMatch) {
         const level = headingMatch[1].length;
@@ -469,7 +331,7 @@
         continue;
       }
 
-      // 箇条書き - item
+      // 箇条書き
       if (/^[-・]\s+/.test(line.trim())) {
         const items = [];
         while (i < lines.length && /^[-・]\s+/.test(lines[i].trim())) {
@@ -480,13 +342,12 @@
         continue;
       }
 
-      // 空行はブロックの区切り
       if (!line.trim()) {
         i++;
         continue;
       }
 
-      // 通常の段落（連続する行は<br>でつなげる）
+      // 通常の段落
       const paraLines = [line];
       i++;
       while (
@@ -547,7 +408,7 @@
     clearTimeout(showToast._t);
     showToast._t = setTimeout(() => {
       els.toast.hidden = true;
-    }, 2600);
+    }, 3200);
   }
 
   function formatDate(ts) {
@@ -556,26 +417,13 @@
     return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
   }
 
-  // ---------------- Connection status UI ----------------
+  // ---------------- Status bar ----------------
 
-  function renderConnStatus() {
-    els.connDot.classList.remove("is-connected", "is-error");
-    if (connectionState === "connected") {
-      els.connDot.classList.add("is-connected");
-      els.connLabel.textContent = `${ghConfig.owner}/${ghConfig.repo}`;
-    } else if (connectionState === "connecting") {
-      els.connLabel.textContent = "接続中…";
-    } else if (connectionState === "error") {
-      els.connDot.classList.add("is-error");
-      els.connLabel.textContent = "接続エラー";
-    } else {
-      els.connLabel.textContent = "GitHub未接続";
-    }
-
+  function renderStatus() {
     if (statusMessage) {
       els.statusBar.hidden = false;
       els.statusBar.textContent = statusMessage;
-      els.statusBar.classList.toggle("is-error", connectionState === "error");
+      els.statusBar.classList.toggle("is-error", loadError);
     } else {
       els.statusBar.hidden = true;
     }
@@ -617,25 +465,22 @@
 
   // ---------------- Views ----------------
 
-  function renderConnectPrompt() {
+  function renderLoading() {
+    els.main.innerHTML = `<div class="empty-state"><h3>読み込み中…</h3><p>辞典のデータを取得しています。</p></div>`;
+  }
+
+  function renderLoadError() {
     els.main.innerHTML = "";
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.innerHTML = `
-      <h3>GitHubリポジトリと接続してください</h3>
-      <p>この辞典のデータはGitHub上のJSONファイルに保存されます。<br>先にリポジトリとアクセストークンを設定しましょう。</p>
-    `;
+    empty.innerHTML = `<h3>読み込めませんでした</h3><p>通信状況を確認して、もう一度お試しください。</p>`;
     const btn = document.createElement("button");
     btn.className = "btn-add";
     btn.type = "button";
-    btn.innerHTML = '接続を設定する';
-    btn.addEventListener("click", openSettings);
+    btn.textContent = "再読み込み";
+    btn.addEventListener("click", loadEntries);
     empty.appendChild(btn);
     els.main.appendChild(empty);
-  }
-
-  function renderConnecting() {
-    els.main.innerHTML = `<div class="empty-state"><h3>読み込み中…</h3><p>GitHubからデータを取得しています。</p></div>`;
   }
 
   function renderCategoryChips() {
@@ -741,7 +586,6 @@
     els.main.appendChild(label);
     els.main.appendChild(grid);
   }
-
 
   function renderArticle(id) {
     const entry = entries.find((e) => e.id === id);
@@ -849,7 +693,7 @@
 
       <div class="form-field" id="bodyField">
         <label for="bodyInput">本文</label>
-        <textarea id="bodyInput" placeholder="この用語について説明を書きます。">${
+        <textarea id="bodyInput" maxlength="20000" placeholder="この用語について説明を書きます。">${
           editing ? escapeHtml(entry.body) : ""
         }</textarea>
         <span class="field-error">本文を入力してください。</span>
@@ -876,33 +720,19 @@
       const body = bodyInput.value.trim();
       const category = categoryInput.value;
 
-      let valid = true;
       form.querySelector("#titleField").classList.toggle("has-error", !title);
       form.querySelector("#bodyField").classList.toggle("has-error", !body);
       form.querySelector("#categoryField").classList.toggle("has-error", !category);
-      if (!title || !body || !category) valid = false;
-      if (!valid) return;
+      if (!title || !body || !category) return;
 
-      let nextEntries;
-      let targetId;
-      if (editing) {
-        targetId = entry.id;
-        nextEntries = entries.map((e) =>
-          e.id === entry.id ? { ...e, title, category, body, updatedAt: Date.now() } : e
-        );
-      } else {
-        targetId = makeId();
-        nextEntries = [...entries, { id: targetId, title, category, body, updatedAt: Date.now() }];
-      }
+      // 追加のときもidをここで決めておくと、保存後にその記事ページへ移動できる
+      const targetId = editing ? entry.id : makeId();
 
       submitBtn.disabled = true;
       const originalLabel = submitBtn.textContent;
-      submitBtn.textContent = "GitHubに保存中…";
+      submitBtn.textContent = "保存中…";
 
-      const result = await commitEntries(
-        nextEntries,
-        editing ? `Update entry: ${title}` : `Add entry: ${title}`
-      );
+      const result = await saveEntry({ id: targetId, title, category, body });
 
       submitBtn.disabled = false;
       submitBtn.textContent = originalLabel;
@@ -912,7 +742,7 @@
         view = { name: "article", id: targetId };
         render();
       }
-      // conflict/failure時はcommitEntries内でトーストを表示済み。フォームはそのまま残す。
+      // 失敗時は writeToApi 内でトーストを表示済み。フォームはそのまま残す。
     });
 
     form.querySelector("#cancelFormBtn").addEventListener("click", () => {
@@ -926,11 +756,6 @@
   }
 
   function openForm(mode, id) {
-    if (!isConfigured()) {
-      showToast("先にGitHub連携を設定してください");
-      openSettings();
-      return;
-    }
     view = { name: "form", mode, id };
     render();
   }
@@ -956,13 +781,11 @@
   els.confirmOk.addEventListener("click", async () => {
     if (!pendingDeleteId) return;
     const id = pendingDeleteId;
-    const target = entries.find((e) => e.id === id);
-    const nextEntries = entries.filter((e) => e.id !== id);
 
     els.confirmOk.disabled = true;
     els.confirmOk.textContent = "削除中…";
 
-    const result = await commitEntries(nextEntries, `Delete entry: ${target ? target.title : id}`);
+    const result = await removeEntry(id);
 
     els.confirmOk.disabled = false;
     els.confirmOk.textContent = "削除する";
@@ -978,88 +801,7 @@
     if (ev.target === els.overlay) closeConfirm();
   });
 
-  // ---------------- Settings modal ----------------
-
-  function openSettings() {
-    els.ghOwner.value = ghConfig ? ghConfig.owner || "" : "";
-    els.ghRepo.value = ghConfig ? ghConfig.repo || "" : "";
-    els.ghBranch.value = ghConfig ? ghConfig.branch || "main" : "main";
-    els.ghPath.value = ghConfig ? ghConfig.path || "data/entries.json" : "data/entries.json";
-    els.ghToken.value = "";
-    els.ghToken.placeholder = ghToken
-      ? "（保存済み・変更する場合のみ入力）"
-      : "repoのContentsに書き込み権限があるトークン";
-    els.ghRemember.checked = localStorage.getItem(REMEMBER_KEY) === "1";
-    els.settingsError.hidden = true;
-    els.settingsForgetBtn.hidden = !ghConfig;
-    els.settingsOverlay.hidden = false;
-    els.ghOwner.focus();
-  }
-
-  function closeSettings() {
-    els.settingsOverlay.hidden = true;
-  }
-
-  els.connBtn.addEventListener("click", openSettings);
-  els.settingsCancelBtn.addEventListener("click", closeSettings);
-  els.settingsOverlay.addEventListener("click", (ev) => {
-    if (ev.target === els.settingsOverlay) closeSettings();
-  });
-
-  els.settingsForgetBtn.addEventListener("click", () => {
-    forgetConnection();
-    closeSettings();
-    view = { name: "home" };
-    showToast("GitHubとの接続を解除しました");
-    render();
-  });
-
-  els.settingsForm.addEventListener("submit", async (ev) => {
-    ev.preventDefault();
-    const owner = els.ghOwner.value.trim();
-    const repo = els.ghRepo.value.trim();
-    const branch = els.ghBranch.value.trim() || "main";
-    const path = els.ghPath.value.trim() || "data/entries.json";
-    const tokenInput = els.ghToken.value.trim();
-    const remember = els.ghRemember.checked;
-
-    if (!owner || !repo || !path) {
-      els.settingsError.hidden = false;
-      els.settingsError.textContent = "ユーザー名・リポジトリ名・ファイルパスは必須です。";
-      return;
-    }
-    if (!tokenInput && !ghToken) {
-      els.settingsError.hidden = false;
-      els.settingsError.textContent = "アクセストークンを入力してください。";
-      return;
-    }
-
-    const submitBtn = els.settingsForm.querySelector('button[type="submit"]');
-    const originalLabel = submitBtn.textContent;
-    submitBtn.disabled = true;
-    submitBtn.textContent = "接続を確認しています…";
-    els.settingsError.hidden = true;
-
-    saveConfig({ owner, repo, branch, path }, tokenInput || null, remember);
-    await fetchFromGitHub();
-
-    submitBtn.disabled = false;
-    submitBtn.textContent = originalLabel;
-
-    if (connectionState === "connected") {
-      // 接続成功。モーダルを閉じてホーム画面へ。
-      closeSettings();
-      view = { name: "home" };
-      render();
-    } else {
-      // 失敗理由をモーダル内にそのまま表示し、入力し直せるようにする。
-      els.settingsError.hidden = false;
-      els.settingsError.textContent =
-        statusMessage || "接続に失敗しました。入力内容を確認してください。";
-    }
-  });
-
-  // ---------------- Export / Import (ローカルへのバックアップ) ----------------
+  // ---------------- Export (ローカルへのバックアップ) ----------------
 
   els.exportBtn.addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(entries, null, 2)], {
@@ -1076,52 +818,7 @@
     showToast("JSONファイルを書き出しました");
   });
 
-  els.refreshBtn.addEventListener("click", () => {
-    fetchFromGitHub();
-  });
-
-  els.importInput.addEventListener("change", (ev) => {
-    const file = ev.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const parsed = JSON.parse(reader.result);
-        if (!Array.isArray(parsed)) throw new Error("形式が正しくありません");
-        const cleaned = parsed
-          .filter((e) => e && typeof e.title === "string" && typeof e.body === "string")
-          .map((e) => ({
-            id: e.id && typeof e.id === "string" ? e.id : makeId(),
-            title: e.title,
-            category: typeof e.category === "string" ? e.category : "",
-            body: e.body,
-            updatedAt: typeof e.updatedAt === "number" ? e.updatedAt : Date.now(),
-          }));
-
-        const existingIds = new Set(entries.map((e) => e.id));
-        const merged = [...entries];
-        let added = 0;
-        cleaned.forEach((e) => {
-          if (!existingIds.has(e.id)) {
-            merged.push(e);
-            added++;
-          }
-        });
-
-        const result = await commitEntries(merged, `Import ${added} entries from backup`);
-        if (result.ok) {
-          view = { name: "home" };
-          render();
-          showToast(`${added}件の項目をGitHubに保存しました`);
-        }
-      } catch (err) {
-        console.error(err);
-        showToast("読み込みに失敗しました。ファイルの形式を確認してください。");
-      }
-      els.importInput.value = "";
-    };
-    reader.readAsText(file);
-  });
+  els.refreshBtn.addEventListener("click", loadEntries);
 
   // ---------------- Search / Add wiring ----------------
 
@@ -1136,23 +833,21 @@
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
     if (!els.overlay.hidden) closeConfirm();
-    if (!els.settingsOverlay.hidden) closeSettings();
   });
 
   // ---------------- Master render ----------------
 
   function render() {
-    renderConnStatus();
+    renderStatus();
     renderAlphaRail();
-    els.entryTotal.textContent = isConfigured() ? `全 ${entries.length} 項目` : "";
+    els.entryTotal.textContent = loading || loadError ? "" : `全 ${entries.length} 項目`;
 
-    if (!isConfigured()) {
-      renderConnectPrompt();
+    if (loading) {
+      renderLoading();
       return;
     }
-
-    if (connectionState === "connecting") {
-      renderConnecting();
+    if (loadError) {
+      renderLoadError();
       return;
     }
 
@@ -1167,11 +862,5 @@
 
   // ---------------- Init ----------------
 
-  loadConfig();
-  render();
-  if (isConfigured()) {
-    fetchFromGitHub();
-  } else {
-    openSettings();
-  }
+  loadEntries();
 })();
