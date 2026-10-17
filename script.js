@@ -7,8 +7,7 @@
 (function () {
   "use strict";
 
-  // ★ デプロイした中継APIのURLに書き換えてください（末尾のスラッシュなし）
-  const API_BASE = "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev";
+  const API_BASE = "https://dictionary-api.ryo-use-mail-25.workers.dev";
 
   const SEED_ENTRIES = [
     {
